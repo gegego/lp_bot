@@ -26,7 +26,11 @@ if (DLMM_Module.default) {
 
 (async () => {
 
-    const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+    // const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+    const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=59d4f054-941b-4286-a6a5-e2f0bdae611d", {
+                                            commitment: "confirmed",
+                                            confirmTransactionInitialTimeout: 60000, // 增加到60秒
+                                        });
     
     const wallet = loadWallet('./wallet.json'); // 替换为你的私钥文件路径
     const pool_addr = 'HbjYfcWZBjCBYTJpZkLGxqArVmZVu3mQcRudb6Wg1sVh';
