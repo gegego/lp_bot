@@ -1,0 +1,30 @@
+{
+  "name": "met_bot",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@meteora-ag/dlmm": "^1.9.3",
+    "@solana/web3.js": "^1.98.4",
+    "body-parser": "^2.2.2",
+    "bs58": "^6.0.0",
+    "cross-fetch": "^4.1.0",
+    "decimal.js": "^10.6.0",
+    "express": "^5.2.1"
+  }
+}
