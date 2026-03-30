@@ -138,6 +138,17 @@ export function loadWallet(path) {
     return Keypair.fromSecretKey(secretKey);
 }
 
+export function loadConfig(path) {
+    let dict;
+    try {
+      dict = JSON.parse(fs.readFileSync(path));
+    } catch (e) {
+        console.error("❌ 无法读取,请确保文件存在。");
+        return;
+    }
+    return dict;
+}
+
 function getBinIdFromPrice(
     targetPrice: number,
     binStep: number,
@@ -632,12 +643,12 @@ export async function rebalance(wallet, connection, dlmmPool, minbinid, maxbinid
 
     if (action === 'BUY_token') {
         console.log(`🛒 比例失衡：正在用 ${amount.toFixed(4)} SOL 买入更多 token...`);
-        await swapSOLtoToken(wallet, dlmmPool.tokenX.publicKey.toString(), Math.floor(amount*1e9));
+        // await swapSOLtoToken(wallet, dlmmPool.tokenX.publicKey.toString(), Math.floor(amount*1e9));
         console.log(`配平后：X： ${totalsolvalX+amount}， Y: ${totalsolvalY-amount}`)
         amountRaw_Sol = Math.floor((totalsolvalY-amount)*1e9)
     } else {
         console.log(`💰 比例失衡：正在卖出 ${amount.toFixed(4)} token 换回 SOL...${amount*currentPrice}`);
-        await swaptokenToSol(connection, wallet, dlmmPool.tokenX.publicKey.toString(), Math.floor(amount*1e6));
+        // await swaptokenToSol(connection, wallet, dlmmPool.tokenX.publicKey.toString(), Math.floor(amount*1e6));
         console.log(`配平后：X： ${totalsolvalX-amount*currentPrice}， Y: ${totalsolvalY+amount*currentPrice}`)
         amountRaw_Sol = Math.floor((totalsolvalY+amount*currentPrice)*1e9)
     }
@@ -653,7 +664,7 @@ export async function closePoorAndTradeALlSol(wallet, connection, dlmmPool) {
     console.log(`pool sol: ${totalSOL}, sol in wallet: ${sol_wallet_1/1e9}, total_x: ${total_x}, total_y:${total_y}`)
     await removeLiquidity(dlmmPool, wallet, connection);
     const token_addr = dlmmPool.tokenX.publicKey.toString()
-    await swaptokenToSol(connection, wallet, token_addr);
+    // await swaptokenToSol(connection, wallet, token_addr);
 }
 
 function calculateRebalanceSwap(
@@ -721,7 +732,7 @@ export async function totally_newposition(wallet, connection, dlmmPool, sol_amou
     // 转换方式 A：简单乘法（容易在小数位多时出问题）
     const amountRaw_SOL = Math.floor(solToSwap * Math.pow(10, decimals)).toString();
     console.log(amountRaw_SOL)
-    await swapSOLtoToken( wallet, token_addr, amountRaw_SOL);
+    // await swapSOLtoToken( wallet, token_addr, amountRaw_SOL);
 
     const raw_sol_tradein = Math.floor((totalSolAmount - solToSwap)*1e9);
     console.log(`raw_sol_tradein: ${raw_sol_tradein}`)
@@ -814,9 +825,7 @@ async function analyze1hStrategy(klines: any[]) {
     if (klines.length < 20) return { action: 'WAIT', reason: '数据不足' };
 
     const lastCandle = klines[klines.length - 1];
-    const prevCandle = klines[klines.length - 2];
-
-    
+    const prevCandle = klines[klines.length - 2];    
     
     // 1. 计算简单的 EMA 20 (这里可以用简单逻辑模拟)
     const prices = klines.map(k => k.close);
@@ -992,128 +1001,6 @@ export function calculateActualAPY(pool) {
     return dailyReturn * 365 * 100; // 转换成百分比年化
 }
 
-async function swapSOLtoToken(wallet, token_addr, amountRaw) {
-    const SOL_MINT = "So11111111111111111111111111111111111111112";
-    try {
-        // 2. 获取 Jupiter 报价 (Quote)
-        // slippageBps: 50 = 0.5% 滑点
-        // const quoteResponse = await getQuote(token_addr, SOL_MINT, amountRaw, 50)
-        const API_KEY = "ca149111-a9eb-4cab-aa81-d2c7d7d9b771";
-        const orderResponse = await (
-                        await fetch(
-                            'https://api.jup.ag/ultra/v1/order?' +
-                            `inputMint=${SOL_MINT}`+                            
-                            `&outputMint=${token_addr}` +
-                            `&amount=${amountRaw}` +
-                            `&taker=${wallet.publicKey.toBase58()}`,
-                            { headers: { 'x-api-key': API_KEY } }
-                        )
-                        ).json();
-        if (!orderResponse.transaction) {
-            throw new Error(orderResponse.errorMessage || orderResponse.error || 'No transaction returned');
-        }
-        console.log(`Quote: ${orderResponse.inAmount} → ${orderResponse.outAmount}`);
-        console.log(`Router: ${orderResponse.router} | Gasless: ${orderResponse.gasless} | Fee: ${orderResponse.feeBps} bps`);
-        // 2. Sign
-        const transaction = VersionedTransaction.deserialize(
-            Buffer.from(orderResponse.transaction, 'base64')
-        );
-        transaction.sign([wallet]);
-        const signedTransaction = Buffer.from(transaction.serialize()).toString('base64');
-        // 3. Execute
-        const executeResponse = await (
-        await fetch('https://api.jup.ag/ultra/v1/execute', {
-            method: 'POST',
-            headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY,
-            },
-            body: JSON.stringify({
-            signedTransaction,
-            requestId: orderResponse.requestId,
-            }),
-        })
-        ).json();
-
-        if (executeResponse.status === 'Success') {
-            console.log(`Done: https://solscan.io/tx/${executeResponse.signature}`);
-            console.log(`In: ${executeResponse.inputAmountResult} | Out: ${executeResponse.outputAmountResult}`);
-        } else {
-            console.error(`Failed (${executeResponse.code}): ${executeResponse.error}`);
-        }
-    } catch (err) {
-        console.error("❌ Swap 失败:", err.message);
-    }
-}
-
-async function swaptokenToSol(connection, wallet, token_addr, amount=0) {
-    const SOL_MINT = "So11111111111111111111111111111111111111112";
-    try {
-        // 1. 获取钱包中 MET 的准确余额 (Lamports)
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {
-            mint: new PublicKey(token_addr),
-        });
-
-        if (tokenAccounts.value.length === 0) {
-            console.log("钱包中没有代币。");
-            return;
-        }
-        let amountRaw = amount;
-        if (amount == 0){
-            amountRaw = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
-            console.log(`准备兑换: ${amountRaw} (MET Lamports)`);
-        }        
-        // 2. 获取 Jupiter 报价 (Quote)
-        // slippageBps: 50 = 0.5% 滑点
-        // const quoteResponse = await getQuote(token_addr, SOL_MINT, amountRaw, 50)
-        const API_KEY = "ca149111-a9eb-4cab-aa81-d2c7d7d9b771";
-        const orderResponse = await (
-                        await fetch(
-                            'https://api.jup.ag/ultra/v1/order?' +
-                            `inputMint=${token_addr}`+
-                            `&outputMint=${SOL_MINT}` +
-                            `&amount=${amountRaw}` +
-                            `&taker=${wallet.publicKey.toBase58()}`,
-                            { headers: { 'x-api-key': API_KEY } }
-                        )
-                        ).json();
-        if (!orderResponse.transaction) {
-            throw new Error(orderResponse.errorMessage || orderResponse.error || 'No transaction returned');
-        }
-        console.log(`Quote: ${orderResponse.inAmount} → ${orderResponse.outAmount}`);
-        console.log(`Router: ${orderResponse.router} | Gasless: ${orderResponse.gasless} | Fee: ${orderResponse.feeBps} bps`);
-        // 2. Sign
-        const transaction = VersionedTransaction.deserialize(
-            Buffer.from(orderResponse.transaction, 'base64')
-        );
-        transaction.sign([wallet]);
-        const signedTransaction = Buffer.from(transaction.serialize()).toString('base64');
-        // 3. Execute
-        const executeResponse = await (
-        await fetch('https://api.jup.ag/ultra/v1/execute', {
-            method: 'POST',
-            headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_KEY,
-            },
-            body: JSON.stringify({
-            signedTransaction,
-            requestId: orderResponse.requestId,
-            }),
-        })
-        ).json();
-
-        if (executeResponse.status === 'Success') {
-            console.log(`Done: https://solscan.io/tx/${executeResponse.signature}`);
-            console.log(`In: ${executeResponse.inputAmountResult} | Out: ${executeResponse.outputAmountResult}`);
-        } else {
-            console.error(`Failed (${executeResponse.code}): ${executeResponse.error}`);
-        }
-    } catch (err) {
-        console.error("❌ Swap 失败:", err.message);
-    }
-}
-
 async function checkRebalanceConditions(dlmmPool, wallet, minbinid, maxbinid) {
     const activeBin = await dlmmPool.getActiveBin();
     const currentPrice =  dlmmPool.fromPricePerLamport(Number(activeBin.price));
@@ -1210,140 +1097,3 @@ async function randomSleep(min: number, max: number) {
     console.log(`💤 随机休眠 ${ms / 1000} 秒...`);
     await sleep(ms);
 }
-
-//new position
-// (async () => {
-
-//     // const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
-//     const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=59d4f054-941b-4286-a6a5-e2f0bdae611d", {
-//                                             commitment: "confirmed",
-//                                             confirmTransactionInitialTimeout: 60000, // 增加到60秒
-//                                         });
-    
-//     const wallet = loadWallet('./wallet.json'); // 替换为你的私钥文件路径
-//     const pool_addr = 'HbjYfcWZBjCBYTJpZkLGxqArVmZVu3mQcRudb6Wg1sVh';
-//     const POOL_ADDRESS = new PublicKey(pool_addr);
-//     const dlmmPool = await DLMM.create(connection, POOL_ADDRESS);    
-//     // console.log("--- 深度结构探测开始 ---");
-//     // console.log(util.inspect(userPositions[0], { 
-//     //     showHidden: false, 
-//     //     depth: 5,         // 递归深度，5层通常足够了
-//     //     colors: true, 
-//     //     compact: false    // 格式化输出，不压缩在一行
-//     // }));
-//     // console.log("--- 深度结构探测结束 ---");
-//     // const result = await dlmmPool.getBinsBetweenMinAndMaxPrice(0.0000231, 0.000026)
-//     // const minBinId = dlmmPool.getBinIdFromPrice(Number(dlmmPool.toPricePerLamport(0.0000241)),false);
-//     // const maxBinId = dlmmPool.getBinIdFromPrice(Number(dlmmPool.toPricePerLamport(0.0000245)), true);
-//     // console.log("minbinid:",minBinId);
-//     // console.log("maxbinid:",maxBinId);
-//     // console.log(currentbin2)
-//     while(true){
-//         try{
-//             await dlmmPool.refetchStates();
-//             const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(wallet.publicKey);
-//             const activebin = await dlmmPool.getActiveBin();
-//             // const currentPrice = dlmmPool.fromPricePerLamport(Number(activebin.price));
-//             console.log(`current bin id:${activebin.binId}`)
-//             // console.log(`current price:${currentPrice}`)
-//             console.log(`positon count:${userPositions.length}`)
-//             if(userPositions.length == 1){
-//                 console.log(`only normal position, open new trade position`)
-//                 // await dlmmPool.refetchStates();
-//                 // const activebin = await dlmmPool.getActiveBin();
-//                 const maxBinId_add = activebin.binId+6
-//                 const minBinId_add = activebin.binId+1
-//                 await createPosition_token(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, 1);
-//             }
-//             else{
-//                 for(const position of userPositions){
-//                     const minBinId = position.positionData.lowerBinId;
-//                     const maxBinId = position.positionData.upperBinId;            
-//                     if((maxBinId - minBinId) < 20){
-//                         console.log(minBinId, maxBinId)
-//                         console.log(`trade position monitor,activeid:${activebin.binId}, minid:${minBinId}, maxBinId:${maxBinId}`)
-
-//                         if (activebin.binId >= (minBinId+2)){
-//                             console.log('order eat')
-//                             await removeLiquidity_single(dlmmPool, wallet, connection, position);
-//                         }        
-
-//                         if(activebin.binId <= (minBinId-3)){
-//                             console.log('price too low, recreate trade order')
-//                             await removeLiquidity_single(dlmmPool, wallet, connection, position);
-//                         }   
-//                     }   
-//                 }
-            
-//             }
-//         }
-//         catch (error) {           
-//             // 如果是其他错误（比如余额不足），直接抛出不再重试
-//             console.error("❌ error:", error.message);
-//         }        
-//         await randomSleep(40, 90)        
-//     }
-
-//     // const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(wallet.publicKey);
-//     // for(const position of userPositions){
-//     //     const minBinId = position.positionData.lowerBinId;
-//     //     const maxBinId = position.positionData.upperBinId;            
-//     //     if((maxBinId - minBinId) < 20){
-//     //         await removeLiquidity_single(dlmmPool, wallet, connection, position);  
-//     //     }   
-//     // }
-
-//     // const currentPrice = dlmmPool.fromPricePerLamport(Number(activebin.price));
-//     // const currentbin = getBinFromPrice(currentPrice, dlmmPool.lbPair.binStep, 9, 6);
-//     // const currentbin2 = dlmmPool.getBinIdFromPrice(activebin.price, false);
-    
-//     // const maxBinId = position.positionData.upperBinId;   
-//     // await removeLiquidity_trade(dlmmPool, wallet, connection);
-//     // const binid = Math.floor(minBinId + (activebin.binId - minBinId)*0.6);
-//     // console.log(binid)
-//     // const minBinId_add = activebin.binId-5
-//     // const maxBinId_add = activebin.binId-1
-//     // await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(0.8*1e9));
-    
-//     // await dlmmPool.refetchStates();
-//     // const activebin = await dlmmPool.getActiveBin();
-//     // const maxBinId_add = activebin.binId+5
-//     // const minBinId_add = activebin.binId
-//     // await createPosition_token(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, 1);
-
-//     // await addLiquidity_part(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(0.3*1e9));
-//     // checkRebalanceConditions(dlmmPool, wallet, minBinId, maxBinId)
-//     // rebalance(wallet,connection, dlmmPool, minBinId, maxBinId);
-//     // await totally_newposition(wallet, connection, dlmmPool, 2.3, minBinId, maxBinId);
-//     //await removeLiquidity_part(dlmmPool, wallet, connection, minBinId, maxBinId)
-// })();
-
-//close position totally
-// (async () => {
-//     const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
-//     const wallet = loadWallet('./wallet.json'); // 替换为你的私钥文件路径
-//     //remove lp
-//     const mypoollist = await getMyPoolAddresses(connection, wallet)
-//     console.log(mypoollist)
-//     for (const pool_addr of mypoollist){
-//         closePoorAndTradeALlSol(wallet, connection, pool_addr)
-//         //reblance
-//         // await rebalance(wallet, connection, pool_addr)
-
-//     }    
-// })();
-
-
-// check pool value：
-// (async () => {
-//     console.log("正在获取数据...");
-//     const result = await findBestPool(); // 这里的 await 是关键！
-//     for (const pool of result){
-//         if((pool.volume['24h']/pool.tvl)>0.1 && pool.name.includes('SOL')){
-//             const targetpool = {'name': pool.name, 'v24h_tvl':pool.volume['24h']/pool.tvl, 'baseFeeRate':pool.pool_config['base_fee_pct']}
-//             const Realized_APY = calculateActualAPY(targetpool)
-//             console.log(`${pool.address},${pool.name}, ${pool.tvl}, ${pool.volume['24h']/pool.tvl}, ${pool.pool_config['bin_step']}, ${Realized_APY}`)
-//         }
-//     }
-//     //console.log("✅ 真正的数据结果：", result);
-// })();
