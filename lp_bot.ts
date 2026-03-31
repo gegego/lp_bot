@@ -78,7 +78,7 @@ class PoolManager {
                         await createPosition_token(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, 1);
                     }
                     else{
-                        const minBinId_add = activebin.binId-60
+                        const minBinId_add = activebin.binId-pool_conf['upper_bin']
                         const maxBinId_add = activebin.binId-1
                         await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(3*1e9));
                     }
