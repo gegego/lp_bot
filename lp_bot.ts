@@ -64,7 +64,7 @@ class PoolManager {
                     else{
                         const minBinId_add = activebin.binId-pool_conf['upper_bin']
                         const maxBinId_add = activebin.binId-1
-                        await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(3*1e9));
+                        await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(pool_conf["pool_size"]*1e9));
                     }
                 }
                 else{
@@ -76,7 +76,10 @@ class PoolManager {
                         console.log(`stopbin:${minBinId+pool_conf["stopbin"]}, rebuildbin:${minBinId-pool_conf["rebuild"]}`)
                         if (activebin.binId >= (minBinId+pool_conf["stopbin"])){
                             console.log('order eat')
-                            await removeLiquidity_single(dlmmPool, wallet, connection, position);
+                            const ret = await removeLiquidity_single(dlmmPool, wallet, connection, position);
+                            if(ret==true){
+                                pool_conf['action'] = "buy";
+                            }                            
                         }        
                         if(activebin.binId <= (minBinId-pool_conf["rebuild"])){
                             console.log('price too low, rebuild trade order')
@@ -88,7 +91,10 @@ class PoolManager {
                         console.log(`stopbin:${maxBinId-pool_conf["stopbin"]}, rebuildbin:${maxBinId+pool_conf["rebuild"]}`)
                         if (activebin.binId <= (maxBinId-pool_conf["stopbin"])){
                             console.log('order eat')
-                            await removeLiquidity_single(dlmmPool, wallet, connection, position);
+                            const ret = await removeLiquidity_single(dlmmPool, wallet, connection, position);
+                            if(ret==true){
+                                pool_conf['action'] = "sell";
+                            }  
                         }        
                         if(activebin.binId >= (maxBinId+pool_conf["rebuild"])){
                             console.log('price too low, rebuild trade order')

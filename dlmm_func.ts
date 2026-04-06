@@ -380,11 +380,14 @@ export async function removeLiquidity_single(dlmmPool, wallet, sol_conn, positio
         for (const tx of removeLiquidityTx) {
             const txid = await safeSendTransaction(sol_conn, tx, [wallet]);
             console.log(`✅ 撤资成功: ${txid}`);
+            return true;
         }
     } else {
         const txid = await safeSendTransaction(sol_conn, removeLiquidityTx, [wallet]);
         console.log(`✅ 撤资成功: ${txid}`);
+        return true;
     }
+    return false;
 }
 
 async function addLiquidity_part(dlmmPool, wallet, sol_conn, minid, maxId, amount) {
