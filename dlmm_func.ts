@@ -469,6 +469,34 @@ async function removeLiquidity_part(dlmmPool, wallet, sol_conn, minid, maxid, pe
     }
 }
 
+export async function get_wallet_token_balance(connection, wallet, mint) {
+    try {
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {
+            mint: new PublicKey(mint),
+        });
+
+        if (tokenAccounts.value.length > 0) {
+            return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+        }
+    } catch (e) {
+        console.error("❌ 查询 token 余额失败:", e.message);
+    }
+    return 0;
+}
+
+export async function snapshot_position(dlmmPool, position) {
+    const feeX = Number(position.positionData.feeX) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+    const feeY = Number(position.positionData.feeY) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
+    // B. 计算当前本金价值 (以 SOL 计价)
+    const totalX = Number(position.positionData.totalXAmount) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+    const totalY = Number(position.positionData.totalYAmount) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
+
+    const total_token = totalX+feeX;
+    const total_sol = totalY+feeY;
+
+    return {total_token, total_sol}
+}
+
 export async function snapshot_pool(dlmmPool, wallet) {
     // 1. 获取最新状态和价格
     await dlmmPool.refetchStates();
@@ -504,15 +532,15 @@ export async function snapshot_pool(dlmmPool, wallet) {
         console.log(`minBinId ${position.positionData.lowerBinId}`);
         console.log(`maxBinId ${position.positionData.upperBinId}`);
 
-        const feeX = Number(position.positionData.feeX) / 1e6; // 假设 MET 是 9 位小数
-        const feeY = Number(position.positionData.feeY) / 1e9; // SOL 是 9 位小数
+        const feeX = Number(position.positionData.feeX) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+        const feeY = Number(position.positionData.feeY) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
 
         const feeInSol = (feeX * currentPrice) + feeY;
         totalUnclaimedFeeInSol += feeInSol;
 
         // B. 计算当前本金价值 (以 SOL 计价)
-        const totalX = Number(position.positionData.totalXAmount) / 1e6;
-        const totalY = Number(position.positionData.totalYAmount) / 1e9;
+        const totalX = Number(position.positionData.totalXAmount) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+        const totalY = Number(position.positionData.totalYAmount) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
         
         const positionValueInSol = (totalX * currentPrice) + totalY;
         totalPositionValueInSol += positionValueInSol;
@@ -559,15 +587,15 @@ async function monitorEarningsInSol(dlmmPool, wallet) {
         console.log(`minBinId ${position.positionData.lowerBinId}`);
         console.log(`maxBinId ${position.positionData.upperBinId}`);
 
-        const feeX = Number(position.positionData.feeX) / 1e6; // 假设 MET 是 9 位小数
-        const feeY = Number(position.positionData.feeY) / 1e9; // SOL 是 9 位小数
+        const feeX = Number(position.positionData.feeX) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+        const feeY = Number(position.positionData.feeY) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
 
         const feeInSol = (feeX * currentPrice) + feeY;
         totalUnclaimedFeeInSol += feeInSol;
 
         // B. 计算当前本金价值 (以 SOL 计价)
-        const totalX = Number(position.positionData.totalXAmount) / 1e6;
-        const totalY = Number(position.positionData.totalYAmount) / 1e9;
+        const totalX = Number(position.positionData.totalXAmount) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
+        const totalY = Number(position.positionData.totalYAmount) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
         
         const positionValueInSol = (totalX * currentPrice) + totalY;
         totalPositionValueInSol += positionValueInSol;

@@ -5,6 +5,7 @@ import_wallet.ts
 *.key
 *.pem
 .env           # 存储 API 密钥或私钥的环境变量文件
+*.csv
 
 # 依赖项
 node_modules/

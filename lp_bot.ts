@@ -1,6 +1,6 @@
 const { Connection, PublicKey, Keypair } = require("@solana/web3.js");
 const fs = require("fs");
-const {loadConfig, loadWallet, createPosition_token, createPosition_sol, removeLiquidity_single, snapshot_pool, findBestPool, calculateActualAPY, closePoorAndTradeALlSol,getMyPoolAddresses} = require("./dlmm_func");
+const {loadConfig, loadWallet, createPosition_token, createPosition_sol, removeLiquidity_single, snapshot_position, get_wallet_token_balance, snapshot_pool} = require("./dlmm_func");
 import DLMM from '@meteora-ag/dlmm';
 const util = require('util');
 
@@ -38,19 +38,41 @@ class PoolManager {
     }
 }
 
+async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
+    const timestamp = new Date().toISOString();
+    const logFile = "balance_history.csv";
+    
+    // 如果文件不存在，写入表头
+    if (!fs.existsSync(logFile)) {
+        fs.writeFileSync(logFile, "timestamp,total_sol,wallet_sol,position_sol,wallet_token_sol\n");
+    }
+    
+    const logLine = `${timestamp},${totalSol.toFixed(6)},${walletSol.toFixed(6)},${totalPosSol.toFixed(6)},${totalTokenValSol.toFixed(6)}\n`;
+    fs.appendFileSync(logFile, logLine);
+    console.log(`📊 [Value Record] Total: ${totalSol.toFixed(4)} SOL (Wallet: ${walletSol.toFixed(4)}, Position: ${totalPosSol.toFixed(4)}, Tokens: ${totalTokenValSol.toFixed(4)})`);
+}
+
 (async () => {   
     const wallet = loadWallet('./wallet.json'); // 替换为你的私钥文件路径
 
     const pool_config_list = config_lp["pool_list"]
     while(true){
+        let totalPosVal = 0;
+        let totalTokenValVal = 0;
+        let walletSol = (await connection.getBalance(wallet.publicKey)) / 1e9;
+
         for(const pool_conf of pool_config_list){
             try{
                 const dlmmPool = await PoolManager.getPool(pool_conf["pool_addr"]);
-                console.log(`pool addr:${pool_conf["pool_addr"]}`)
-                // await dlmmPool.refetchStates();
-                const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(wallet.publicKey);
+                console.log(`pool addr:${pool_conf["pool_addr"]}`)                
                 const activebin = await dlmmPool.getActiveBin();
-                // const currentPrice = dlmmPool.fromPricePerLamport(Number(activebin.price));
+                const currentPrice = Number(dlmmPool.fromPricePerLamport(Number(activebin.price)));
+
+                const tokenXAddr = dlmmPool.tokenX.publicKey.toBase58();
+                const tokenBal = Number(await get_wallet_token_balance(connection, wallet, tokenXAddr));
+                totalTokenValVal += tokenBal * currentPrice;
+
+                const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(wallet.publicKey);
                 console.log(`current bin id:${activebin.binId}`)
                 // console.log(`current price:${currentPrice}`)
                 console.log(`positon count:${userPositions.length}`)
@@ -70,7 +92,9 @@ class PoolManager {
                 else{
                     const position = userPositions[0]
                     const minBinId = position.positionData.lowerBinId;
-                    const maxBinId = position.positionData.upperBinId;    
+                    const maxBinId = position.positionData.upperBinId;
+                    const posVal = await snapshot_position(dlmmPool, position);
+                    totalPosVal += (posVal.total_token * currentPrice) +posVal.total_sol;
                     if(pool_conf['action']=="sell"){
                         console.log(`sell position monitor,activeid:${activebin.binId}, minid:${minBinId}, maxBinId:${maxBinId}`)
                         console.log(`stopbin:${minBinId+pool_conf["stopbin"]}, rebuildbin:${minBinId-pool_conf["rebuild"]}`)
@@ -109,6 +133,8 @@ class PoolManager {
             }    
             await randomSleep(5, 10)      
         }
+        // 循环结束后记录总价值
+        await recordValue(walletSol + totalPosVal + totalTokenValVal, walletSol, totalPosVal, totalTokenValVal);
         await randomSleep(50, 70)        
     }
 })();
@@ -121,3 +147,4 @@ class PoolManager {
 //     compact: false    // 格式化输出，不压缩在一行
 // }));
 // console.log("--- 深度结构探测结束 ---");
+
