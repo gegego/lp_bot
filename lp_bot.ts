@@ -94,7 +94,7 @@ async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
                     const minBinId = position.positionData.lowerBinId;
                     const maxBinId = position.positionData.upperBinId;
                     const posVal = await snapshot_position(dlmmPool, position);
-                    totalPosVal += (posVal.total_token * currentPrice) +posVal.total_sol;
+                    totalPosVal += (posVal.total_token * currentPrice) +posVal.total_sol+0.0574;
                     if(pool_conf['action']=="sell"){
                         console.log(`sell position monitor,activeid:${activebin.binId}, minid:${minBinId}, maxBinId:${maxBinId}`)
                         console.log(`stopbin:${minBinId+pool_conf["stopbin"]}, rebuildbin:${minBinId-pool_conf["rebuild"]}`)
