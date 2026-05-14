@@ -263,7 +263,7 @@ export async function createPosition_sol(dlmmPool, wallet, sol_conn, minbinid, m
         totalXAmount: totalXAmount,
         totalYAmount: totalYAmount,
         strategy: {
-            strategyType: 2,
+            strategyType: 0,
             minBinId: minBinId,
             maxBinId: maxBinId,            
         },
@@ -311,7 +311,7 @@ export async function createPosition_token(dlmmPool, wallet, sol_conn, minbinid,
         totalXAmount: totalXAmount,
         totalYAmount: totalYAmount,
         strategy: {
-            strategyType: 2,
+            strategyType: 0,
             minBinId: minBinId,
             maxBinId: maxBinId,            
         },
