@@ -135,7 +135,7 @@ async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
         }
         // 循环结束后记录总价值
         await recordValue(walletSol + totalPosVal + totalTokenValVal, walletSol, totalPosVal, totalTokenValVal);
-        await randomSleep(50, 70)        
+        await randomSleep(150, 210)        
     }
 })();
 
