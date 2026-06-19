@@ -1,6 +1,6 @@
 const { Connection, PublicKey, Keypair } = require("@solana/web3.js");
 const fs = require("fs");
-const {loadConfig, loadWallet, createPosition_token, createPosition_sol, removeLiquidity_single, snapshot_position, get_wallet_token_balance, snapshot_pool} = require("./dlmm_func");
+const {loadConfig, loadWallet, createPosition_token, createPosition_sol, removeLiquidity_single, snapshot_position, get_wallet_token_balance, snapshot_pool, swaptokenToSol} = require("./dlmm_func");
 import DLMM from '@meteora-ag/dlmm';
 const util = require('util');
 
@@ -38,6 +38,16 @@ class PoolManager {
     }
 }
 
+// 每个池子上一轮观测到的价格，用于计算轮询周期内的价格变动（急跌信号）。
+// 进程重启后会重新建立基准，第一轮无参照时不触发。
+const priceHistory: Map<string, { price: number; ts: number }> = new Map();
+
+// 返回当前价相对上一轮观测价的变动比例；无历史记录时返回 0（视为平稳）。
+function getDropPct(poolAddr: string, currentPrice: number): number {
+    const last = priceHistory.get(poolAddr);
+    return last ? (currentPrice - last.price) / last.price : 0;
+}
+
 async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
     const timestamp = new Date().toISOString();
     const logFile = "balance_history.csv";
@@ -68,6 +78,13 @@ async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
                 const activebin = await dlmmPool.getActiveBin();
                 const currentPrice = Number(dlmmPool.fromPricePerLamport(Number(activebin.price)));
 
+                // 急跌信号：与上一轮观测价比较（阈值为每个轮询周期 ~3min 内的跌幅，
+                // 应设得高于该池正常成交速度，避免误触发）。
+                const dropPct = getDropPct(pool_conf["pool_addr"], currentPrice);
+                priceHistory.set(pool_conf["pool_addr"], { price: currentPrice, ts: Date.now() });
+                const STOP_LOSS_PCT = pool_conf["stop_loss_pct"] ?? 0.05;
+                const VOL_FILTER_PCT = pool_conf["vol_filter_pct"] ?? 0.03;
+
                 const tokenXAddr = dlmmPool.tokenX.publicKey.toBase58();
                 const tokenBal = Number(await get_wallet_token_balance(connection, wallet, tokenXAddr));
                 totalTokenValVal += tokenBal * currentPrice;
@@ -77,16 +94,22 @@ async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
                 // console.log(`current price:${currentPrice}`)
                 console.log(`positon count:${userPositions.length}`)
                 if(userPositions.length == 0){
-                    console.log(`only normal position, open new trade position`)
-                    if(pool_conf['action']=="sell"){
-                        const maxBinId_add = activebin.binId+pool_conf['upper_bin']
-                        const minBinId_add = activebin.binId+1
-                        await createPosition_token(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, 1);
+                    // 波动率过滤：市场仍在急跌时不开新仓，避免接飞刀
+                    if(dropPct <= -VOL_FILTER_PCT){
+                        console.log(`⏸️ volatility filter: skip entry (dropPct=${(dropPct*100).toFixed(2)}%)`)
                     }
                     else{
-                        const minBinId_add = activebin.binId-pool_conf['upper_bin']
-                        const maxBinId_add = activebin.binId-1
-                        await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(pool_conf["pool_size"]*1e9));
+                        console.log(`only normal position, open new trade position`)
+                        if(pool_conf['action']=="sell"){
+                            const maxBinId_add = activebin.binId+pool_conf['upper_bin']
+                            const minBinId_add = activebin.binId+1
+                            await createPosition_token(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, 1);
+                        }
+                        else{
+                            const minBinId_add = activebin.binId-pool_conf['upper_bin']
+                            const maxBinId_add = activebin.binId-1
+                            await createPosition_sol(dlmmPool, wallet, connection, minBinId_add, maxBinId_add, Math.floor(pool_conf["pool_size"]*1e9));
+                        }
                     }
                 }
                 else{
@@ -95,7 +118,18 @@ async function recordValue(totalSol, walletSol, totalPosSol, totalTokenValSol) {
                     const maxBinId = position.positionData.upperBinId;
                     const posVal = await snapshot_position(dlmmPool, position);
                     totalPosVal += (posVal.total_token * currentPrice) +posVal.total_sol+0.0574;
-                    if(pool_conf['action']=="sell"){
+                    // 🛑 急跌止损：一个轮询周期内跌幅超过阈值，立即撤资并把 token 换回 SOL，
+                    // 不翻转 action，下一轮由波动率过滤决定是否重新进场。
+                    if(dropPct <= -STOP_LOSS_PCT){
+                        console.log(`🛑 crash stop-loss triggered (dropPct=${(dropPct*100).toFixed(2)}%), removing liquidity`)
+                        await removeLiquidity_single(dlmmPool, wallet, connection, position);
+                        try{
+                            await swaptokenToSol(connection, wallet, dlmmPool);
+                        }catch(swapErr){
+                            console.error("❌ stop-loss swap 失败（流动性已撤出）:", swapErr.message);
+                        }
+                    }
+                    else if(pool_conf['action']=="sell"){
                         console.log(`sell position monitor,activeid:${activebin.binId}, minid:${minBinId}, maxBinId:${maxBinId}`)
                         console.log(`stopbin:${minBinId+pool_conf["stopbin"]}, rebuildbin:${minBinId-pool_conf["rebuild"]}`)
                         if (activebin.binId >= (minBinId+pool_conf["stopbin"])){

@@ -484,6 +484,63 @@ export async function get_wallet_token_balance(connection, wallet, mint) {
     return 0;
 }
 
+// 急跌止损时使用：把钱包里的 token(X) 全部通过同一个 DLMM 池子换回 SOL(Y)
+// 复用现有的 safeSendTransaction 签名/重试逻辑，签名者只有 wallet。
+// slippageBps：允许滑点（基点，100 = 1%）。
+export async function swaptokenToSol(connection, wallet, dlmmPool, slippageBps = 100) {
+    await dlmmPool.refetchStates(); // 刷新池子状态，保证 bin array / 报价是最新的
+
+    // 1. 读取钱包里 token X 的原始余额（与 createPosition_token 同样的读法）
+    let amountRawX = 0;
+    try {
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {
+            mint: dlmmPool.tokenX.publicKey,
+        });
+        if (tokenAccounts.value.length > 0) {
+            amountRawX = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
+        }
+    } catch (e) {
+        console.error("❌ 查询 token 余额失败:", e.message);
+        return false;
+    }
+
+    const amountIn = new BN(amountRawX);
+    if (amountIn.isZero()) {
+        console.log("🪙 无 token 余额可兑换，跳过 swap");
+        return false;
+    }
+
+    // 2. token(X) -> SOL(Y)，方向为 swapForY = true
+    const swapForY = true;
+    const binArrays = await dlmmPool.getBinArrayForSwap(swapForY);
+
+    // 3. 计算报价（带滑点保护，得到 minOutAmount）
+    const swapQuote = dlmmPool.swapQuote(
+        amountIn,
+        swapForY,
+        new BN(slippageBps), // 滑点，单位 bps
+        binArrays
+    );
+    console.log(`🔄 卖出 token 换 SOL: in=${amountIn.toString()}, minOut(SOL)=${swapQuote.minOutAmount.toString()}`);
+
+    // 4. 构造 swap 交易
+    // 注意：Y 侧为 wrapped SOL；Meteora swap 会自动创建/关闭 WSOL 账户解包成原生 SOL。
+    const swapTx = await dlmmPool.swap({
+        inToken: dlmmPool.tokenX.publicKey,
+        outToken: dlmmPool.tokenY.publicKey,
+        inAmount: amountIn,
+        minOutAmount: swapQuote.minOutAmount,
+        lbPair: dlmmPool.pubkey,
+        user: wallet.publicKey,
+        binArraysPubkey: swapQuote.binArraysPubkey,
+    });
+
+    // 5. 发送并确认（复用现有签名/重试逻辑）
+    const txid = await safeSendTransaction(connection, swapTx, [wallet]);
+    console.log(`✅ token 已兑换为 SOL: ${txid}`);
+    return true;
+}
+
 export async function snapshot_position(dlmmPool, position) {
     const feeX = Number(position.positionData.feeX) / Math.pow(10, dlmmPool.tokenX.mint.decimals);
     const feeY = Number(position.positionData.feeY) / Math.pow(10, dlmmPool.tokenY.mint.decimals);
